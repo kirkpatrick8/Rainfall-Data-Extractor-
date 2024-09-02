@@ -5,9 +5,16 @@ import numpy.ma as ma
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+import io
 
-def extract_data(file_path, variable, target_x, target_y):
-    with nc.Dataset(file_path, 'r') as ds:
+def extract_data(file, variable, target_x, target_y):
+    if isinstance(file, str):  # Local file path
+        ds = nc.Dataset(file, 'r')
+    else:  # Uploaded file
+        file_content = io.BytesIO(file.read())
+        ds = nc.Dataset('in-memory-file', mode='r', memory=file_content.read())
+    
+    try:
         st.write(f"Variables in the file: {list(ds.variables.keys())}")
         
         if variable not in ds.variables:
@@ -53,28 +60,40 @@ def extract_data(file_path, variable, target_x, target_y):
         dates = nc.num2date(time, units=time_units, calendar=time_calendar)
         
         return dates, data
+    finally:
+        ds.close()
 
 def main():
     st.title("NetCDF Data Extractor")
 
     st.header("Input Parameters")
     
-    # File path input
-    st.subheader("NetCDF File Path")
-    file_path = st.text_input("Enter the full path to your NetCDF file or directory containing NetCDF files:")
+    # File input method selection
+    input_method = st.radio("Choose input method:", ("Upload File", "Local File Path"))
+    
+    if input_method == "Upload File":
+        uploaded_file = st.file_uploader("Choose a NetCDF file", type="nc")
+        if uploaded_file is not None:
+            file = uploaded_file
+    else:
+        file_path = st.text_input("Enter the full path to your NetCDF file:")
+        if file_path:
+            if os.path.isfile(file_path):
+                file = file_path
+            else:
+                st.error(f"File not found: {file_path}")
+                return
 
-    if file_path:
-        if os.path.isdir(file_path):
-            # If it's a directory, list all .nc files
-            nc_files = [f for f in os.listdir(file_path) if f.endswith('.nc')]
-            selected_file = st.selectbox("Select a NetCDF file", nc_files)
-            full_path = os.path.join(file_path, selected_file)
-        else:
-            full_path = file_path
-
+    if 'file' in locals():
         # Get variables from the file
-        with nc.Dataset(full_path, 'r') as ds:
-            variables = list(ds.variables.keys())
+        if isinstance(file, str):
+            with nc.Dataset(file, 'r') as ds:
+                variables = list(ds.variables.keys())
+        else:
+            file.seek(0)
+            with nc.Dataset('in-memory-file', mode='r', memory=file.read()) as ds:
+                variables = list(ds.variables.keys())
+            file.seek(0)
         
         # Variable selection
         selected_variable = st.selectbox("Select a variable to extract", variables)
@@ -102,7 +121,7 @@ def main():
 
         if st.button("Extract Data"):
             try:
-                dates, data = extract_data(full_path, selected_variable, target_x, target_y)
+                dates, data = extract_data(file, selected_variable, target_x, target_y)
                 
                 # Create a DataFrame and sort by date
                 df = pd.DataFrame({
