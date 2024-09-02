@@ -1,0 +1,4 @@
+streamlit
+netCDF4
+numpy
+pandas
